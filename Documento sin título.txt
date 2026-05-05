@@ -1,0 +1,515 @@
+﻿```html
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Caja - Casilla Tenis</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- React y ReactDOM -->
+    <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <!-- Babel para JSX -->
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <!-- Lucide Icons -->
+    <script src="https://unpkg.com/lucide@latest"></script>
+
+
+    <style>
+        body {
+            background-color: #f9fafb;
+            font-family: system-ui, -apple-system, sans-serif;
+            -webkit-tap-highlight-color: transparent;
+        }
+        .pb-safe { padding-bottom: env(safe-area-inset-bottom, 20px); }
+        .custom-scrollbar::-webkit-scrollbar { height: 4px; }
+        .custom-scrollbar::-webkit-scrollbar-track { background: #f1f1f1; border-radius: 4px; }
+        .custom-scrollbar::-webkit-scrollbar-thumb { background: #d1d5db; border-radius: 4px; }
+        
+        /* Animaciones */
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(5px); } to { opacity: 1; transform: translateY(0); } }
+        .animate-fade-in { animation: fadeIn 0.3s ease-out forwards; }
+        @keyframes bounce-short { 0%, 100% { transform: translateY(0) translateX(-50%); } 50% { transform: translateY(-25%) translateX(-50%); } }
+        .animate-bounce-short { animation: bounce-short 1s ease-in-out infinite; }
+    </style>
+</head>
+<body>
+    <div id="root"></div>
+
+
+    <!-- Firebase SDK (Módulos importados dentro del script type="module") -->
+    <script type="module" data-plugins="transform-modules-umd">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.1/firebase-app.js";
+        import { getAuth, GoogleAuthProvider, signInWithPopup, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/10.8.1/firebase-auth.js";
+        import { getFirestore, collection, doc, setDoc, deleteDoc, onSnapshot, query, orderBy } from "https://www.gstatic.com/firebasejs/10.8.1/firebase-firestore.js";
+
+
+        // --- CONFIGURACIÓN DE FIREBASE ---
+        // ¡IMPORTANTE! Reemplaza esto con la configuración de TU proyecto de Firebase
+        const firebaseConfig = {
+            // apiKey: "TU_API_KEY",
+            // authDomain: "TU_PROYECTO.firebaseapp.com",
+            // projectId: "TU_PROYECTO",
+            // storageBucket: "TU_PROYECTO.appspot.com",
+            // messagingSenderId: "...",
+            // appId: "..."
+        };
+
+
+        // Si no se ha configurado Firebase, usaremos un modo "local" para que la app no falle al instante
+        const isFirebaseConfigured = Object.keys(firebaseConfig).length > 0;
+        
+        let app, auth, db;
+        if (isFirebaseConfigured) {
+            app = initializeApp(firebaseConfig);
+            auth = getAuth(app);
+            db = getFirestore(app);
+        }
+
+
+        // --- ICONOS COMPONENTES ---
+        // Simulamos los componentes de Lucide para React
+        const Icon = ({ name, size = 24, className = '', color = 'currentColor', strokeWidth = 2 }) => {
+            const svgRef = React.useRef(null);
+            React.useEffect(() => {
+                if (svgRef.current) {
+                    lucide.createIcons({ icons: { [name]: lucide.icons[name] }, nameAttr: 'data-lucide', attrs: { class: className, width: size, height: size, stroke: color, 'stroke-width': strokeWidth } });
+                }
+            }, [name, size, className, color, strokeWidth]);
+            return React.createElement('i', { 'data-lucide': name, ref: svgRef, className: className });
+        };
+
+
+        const ICON_NAMES = {
+            Droplet: 'droplet', Zap: 'zap', Circle: 'circle', ShoppingBag: 'shopping-bag', 
+            CalendarDays: 'calendar-days', Clock: 'clock', Coffee: 'coffee', Star: 'star', 
+            Trophy: 'trophy', Activity: 'activity', Store: 'store', ArrowRightLeft: 'arrow-right-left',
+            Settings: 'settings', Plus: 'plus', Trash2: 'trash-2', DollarSign: 'dollar-sign',
+            Cloud: 'cloud', CloudOff: 'cloud-off', Loader2: 'loader-2', LogOut: 'log-out',
+            ArrowUpCircle: 'arrow-up-circle', ArrowDownCircle: 'arrow-down-circle', AlertCircle: 'alert-circle'
+        };
+
+
+        const COLOR_MAP = [
+            'bg-blue-500', 'bg-orange-500', 'bg-yellow-500', 'bg-purple-500',
+            'bg-green-500', 'bg-emerald-600', 'bg-red-500', 'bg-pink-500', 'bg-indigo-500', 'bg-slate-700'
+        ];
+
+
+        // --- APLICACIÓN REACT ---
+        function App() {
+            const [user, setUser] = React.useState(null);
+            const [isLoadingAuth, setIsLoadingAuth] = React.useState(true);
+            
+            // Datos
+            const [transactions, setTransactions] = React.useState([]);
+            const [quickItems, setQuickItems] = React.useState([]);
+            const [isLoadingData, setIsLoadingData] = React.useState(false);
+
+
+            // Estados de UI
+            const [activeTab, setActiveTab] = React.useState('pos');
+            const [showNotification, setShowNotification] = React.useState(false);
+            const [notificationMsg, setNotificationMsg] = React.useState('');
+            const [itemToDelete, setItemToDelete] = React.useState(null);
+            
+            // Estados Movimientos
+            const [movType, setMovType] = React.useState('out');
+            const [movAmount, setMovAmount] = React.useState('');
+            const [movConcept, setMovConcept] = React.useState('');
+
+
+            // Estados Ajustes
+            const [newItemName, setNewItemName] = React.useState('');
+            const [newItemPrice, setNewItemPrice] = React.useState('');
+            const [newItemIcon, setNewItemIcon] = React.useState('Circle');
+            const [newItemColor, setNewItemColor] = React.useState('bg-blue-500');
+
+
+            // Estados Venta
+            const [customName, setCustomName] = React.useState('');
+            const [customPrice, setCustomPrice] = React.useState('');
+
+
+            // 1. Autenticación
+            React.useEffect(() => {
+                if (!isFirebaseConfigured) {
+                    setIsLoadingAuth(false);
+                    return;
+                }
+                const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
+                    setUser(currentUser);
+                    setIsLoadingAuth(false);
+                });
+                return () => unsubscribe();
+            }, []);
+
+
+            // 2. Carga de Datos
+            React.useEffect(() => {
+                if (!isFirebaseConfigured || !user) {
+                    setIsLoadingData(false);
+                    return;
+                }
+                setIsLoadingData(true);
+                
+                // Transacciones
+                const txRef = collection(db, 'casilla_users', user.uid, 'transactions');
+                const unsubTx = onSnapshot(txRef, (snapshot) => {
+                    const txData = snapshot.docs.map(doc => {
+                        const data = doc.data();
+                        return { id: doc.id, ...data, timestamp: data.timestamp?.toDate ? data.timestamp.toDate() : new Date(data.timestamp) };
+                    });
+                    txData.sort((a, b) => b.timestamp - a.timestamp);
+                    setTransactions(txData);
+                }, (err) => console.error(err));
+
+
+                // Artículos
+                const itemsRef = collection(db, 'casilla_users', user.uid, 'quickItems');
+                const unsubItems = onSnapshot(itemsRef, (snapshot) => {
+                    const itemsData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+                    setQuickItems(itemsData);
+                    setIsLoadingData(false);
+                }, (err) => console.error(err));
+
+
+                return () => { unsubTx(); unsubItems(); };
+            }, [user]);
+
+
+            const handleGoogleLogin = async () => {
+                if (!isFirebaseConfigured) {
+                    alert("Debes configurar las credenciales de Firebase en el código HTML.");
+                    return;
+                }
+                try {
+                    const provider = new GoogleAuthProvider();
+                    await signInWithPopup(auth, provider);
+                } catch (error) {
+                    console.error("Error Login:", error);
+                    triggerNotification("Error al iniciar sesión");
+                }
+            };
+
+
+            const handleLogout = async () => {
+                if(isFirebaseConfigured) await signOut(auth);
+            };
+
+
+            const triggerNotification = (msg) => {
+                setNotificationMsg(msg);
+                setShowNotification(true);
+                setTimeout(() => setShowNotification(false), 2000);
+            };
+
+
+            const todaysTransactions = React.useMemo(() => {
+                const today = new Date();
+                return transactions.filter(t => 
+                    t.timestamp.getDate() === today.getDate() &&
+                    t.timestamp.getMonth() === today.getMonth() &&
+                    t.timestamp.getFullYear() === today.getFullYear()
+                );
+            }, [transactions]);
+
+
+            const totals = React.useMemo(() => {
+                let sales = 0, cashIn = 0, cashOut = 0;
+                todaysTransactions.forEach(t => {
+                    if (t.type === 'sale') sales += t.amount;
+                    else if (t.type === 'in') cashIn += t.amount;
+                    else if (t.type === 'out') cashOut += t.amount;
+                });
+                return { sales, cashIn, cashOut, net: sales + cashIn - cashOut };
+            }, [todaysTransactions]);
+
+
+            const addTransaction = async (description, amount, type) => {
+                if (!description || !amount || isNaN(amount) || !user) return;
+                const newId = crypto.randomUUID();
+                
+                try {
+                    if (isFirebaseConfigured) {
+                        const docRef = doc(db, 'casilla_users', user.uid, 'transactions', newId);
+                        await setDoc(docRef, { description, amount: parseFloat(amount), type, timestamp: new Date() });
+                    }
+                    triggerNotification("Guardado");
+                    if (type === 'sale') { setCustomName(''); setCustomPrice(''); }
+                    else { setMovAmount(''); setMovConcept(''); }
+                } catch (error) {
+                    console.error("Error saving tx:", error);
+                }
+            };
+
+
+            const deleteTransaction = async (id) => {
+                if (!user) return;
+                try {
+                    if (isFirebaseConfigured) {
+                        await deleteDoc(doc(db, 'casilla_users', user.uid, 'transactions', id));
+                    }
+                    setItemToDelete(null);
+                    triggerNotification("Eliminado");
+                } catch (error) { console.error("Error deleting tx:", error); }
+            };
+
+
+            const addQuickItem = async (e) => {
+                e.preventDefault();
+                if (!newItemName || !newItemPrice || !user) return;
+                const newId = crypto.randomUUID();
+                try {
+                    if (isFirebaseConfigured) {
+                        const docRef = doc(db, 'casilla_users', user.uid, 'quickItems', newId);
+                        await setDoc(docRef, { name: newItemName, price: parseFloat(newItemPrice), iconStr: newItemIcon, colorClass: newItemColor });
+                    }
+                    setNewItemName(''); setNewItemPrice('');
+                    triggerNotification("Artículo creado");
+                } catch (error) { console.error("Error saving item:", error); }
+            };
+
+
+            const deleteQuickItem = async (id) => {
+                if (!user) return;
+                try {
+                    if (isFirebaseConfigured) {
+                        await deleteDoc(doc(db, 'casilla_users', user.uid, 'quickItems', id));
+                    }
+                } catch (error) { console.error("Error deleting item:", error); }
+            };
+
+
+            const formatMoney = (amount) => new Intl.NumberFormat('es-AR', { style: 'currency', currency: 'ARS', maximumFractionDigits: 0 }).format(amount);
+            const formatTime = (date) => date.toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' });
+
+
+            // --- VISTAS ---
+            if (isLoadingAuth) return React.createElement('div', {className: "min-h-screen flex items-center justify-center"}, React.createElement(Icon, {name: "loader-2", className: "animate-spin text-emerald-500", size: 48}));
+
+
+            if (!user) {
+                return React.createElement('div', {className: "min-h-screen flex flex-col items-center justify-center p-6 text-center"},
+                    React.createElement('div', {className: "bg-white p-8 rounded-3xl shadow-xl max-w-sm w-full"},
+                        React.createElement('div', {className: "bg-emerald-100 w-20 h-20 rounded-full flex items-center justify-center mx-auto mb-6"},
+                            React.createElement(Icon, {name: "store", size: 40, className: "text-emerald-600"})
+                        ),
+                        React.createElement('h1', {className: "text-2xl font-bold text-gray-900 mb-2"}, "Casilla de Tenis"),
+                        React.createElement('p', {className: "text-gray-500 mb-8 text-sm"}, "Iniciá sesión para continuar."),
+                        !isFirebaseConfigured && React.createElement('p', {className: "text-red-500 text-xs mb-4 p-2 bg-red-50 rounded"}, "Aviso: Falta configurar Firebase en el código fuente."),
+                        React.createElement('button', {
+                            onClick: handleGoogleLogin,
+                            className: "w-full bg-slate-900 text-white rounded-xl py-4 font-semibold flex items-center justify-center gap-3 hover:bg-slate-800"
+                        }, "Entrar con Google")
+                    )
+                );
+            }
+
+
+            return React.createElement('div', {className: "min-h-screen flex flex-col max-w-md mx-auto shadow-2xl relative"},
+                // HEADER
+                React.createElement('header', {className: "bg-slate-900 text-white p-4 sticky top-0 z-10 shadow-md"},
+                    React.createElement('div', {className: "flex justify-between items-center mb-2"},
+                        React.createElement('h1', {className: "text-lg font-bold flex items-center gap-2"}, "🎾 Casilla"),
+                        React.createElement('div', {className: "flex items-center gap-1 text-[10px] font-medium bg-slate-800 px-2 py-1 rounded-full"},
+                            React.createElement(Icon, {name: "cloud", size: 12, className: "text-emerald-400"}), " Sincronizado"
+                        )
+                    ),
+                    React.createElement('div', {className: "border-t border-slate-700 pt-3 mt-1 flex justify-between items-end"},
+                        React.createElement('div', null,
+                            React.createElement('p', {className: "text-xs text-slate-400 uppercase tracking-wider mb-0.5"}, "En Caja (Neto Hoy)"),
+                            React.createElement('p', {className: "text-2xl font-bold text-emerald-400 leading-none"}, formatMoney(totals.net))
+                        ),
+                        totals.cashOut > 0 && React.createElement('div', {className: "text-right"},
+                            React.createElement('p', {className: "text-[10px] text-slate-400 uppercase"}, "Retirado"),
+                            React.createElement('p', {className: "text-sm font-semibold text-red-400"}, `-${formatMoney(totals.cashOut)}`)
+                        )
+                    )
+                ),
+
+
+                // NOTIFICACION
+                showNotification && React.createElement('div', {className: "fixed top-28 left-1/2 -translate-x-1/2 bg-slate-800 text-white px-5 py-2.5 rounded-full shadow-lg text-sm font-bold animate-bounce-short z-50 flex items-center gap-2"},
+                    React.createElement(Icon, {name: "cloud", size: 16, className: "text-emerald-400"}), notificationMsg
+                ),
+
+
+                // MODAL ELIMINAR
+                itemToDelete && React.createElement('div', {className: "fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4"},
+                    React.createElement('div', {className: "bg-white rounded-2xl p-6 w-full max-w-xs shadow-xl text-center"},
+                        React.createElement('div', {className: "flex justify-center mb-4"}, React.createElement(Icon, {name: "alert-circle", size: 48, className: "text-red-500"})),
+                        React.createElement('h3', {className: "text-lg font-bold mb-2"}, "¿Eliminar registro?"),
+                        React.createElement('div', {className: "flex gap-3 mt-6"},
+                            React.createElement('button', {onClick: () => setItemToDelete(null), className: "flex-1 bg-gray-100 py-3 rounded-xl font-medium"}, "Cancelar"),
+                            React.createElement('button', {onClick: () => deleteTransaction(itemToDelete), className: "flex-1 bg-red-500 text-white py-3 rounded-xl font-medium"}, "Eliminar")
+                        )
+                    )
+                ),
+
+
+                // MAIN CONTENT
+                React.createElement('main', {className: "flex-1 p-4 overflow-y-auto pb-24"},
+                    isLoadingData ? React.createElement('div', {className: "flex justify-center py-20"}, React.createElement(Icon, {name: "loader-2", className: "animate-spin text-emerald-500", size: 40})) :
+                    
+                    React.createElement(React.Fragment, null,
+                        // TAB POS
+                        activeTab === 'pos' && React.createElement('div', {className: "animate-fade-in"},
+                            React.createElement('section', {className: "mb-6"},
+                                React.createElement('h2', {className: "text-sm font-semibold text-gray-500 uppercase tracking-wider mb-3"}, "Venta Rápida"),
+                                quickItems.length === 0 ? React.createElement('div', {className: "text-center py-8 bg-white rounded-xl border border-dashed"}, "Sin artículos. Ve a Ajustes.") :
+                                React.createElement('div', {className: "grid grid-cols-2 gap-3"},
+                                    quickItems.map(item => React.createElement('button', {
+                                        key: item.id,
+                                        onClick: () => addTransaction(item.name, item.price, 'sale'),
+                                        className: `${item.colorClass} hover:opacity-90 active:scale-95 text-white p-4 rounded-2xl shadow-sm flex flex-col items-center gap-2 h-28`
+                                    },
+                                        React.createElement(Icon, {name: ICON_NAMES[item.iconStr] || 'circle', size: 32}),
+                                        React.createElement('span', {className: "font-medium text-center leading-tight"}, item.name),
+                                        React.createElement('span', {className: "bg-black/20 px-2 py-1 rounded-lg text-xs font-bold"}, formatMoney(item.price))
+                                    ))
+                                )
+                            ),
+                            React.createElement('section', {className: "mb-8 bg-white p-4 rounded-2xl shadow-sm border border-gray-100"},
+                                React.createElement('h2', {className: "text-sm font-semibold text-gray-500 uppercase tracking-wider mb-3"}, "Venta Personalizada"),
+                                React.createElement('input', {type: "text", placeholder: "Concepto", className: "w-full bg-gray-50 border rounded-xl px-4 py-3 mb-3", value: customName, onChange: e => setCustomName(e.target.value)}),
+                                React.createElement('div', {className: "flex gap-2"},
+                                    React.createElement('input', {type: "number", placeholder: "Monto", className: "flex-1 bg-gray-50 border rounded-xl px-4 py-3", value: customPrice, onChange: e => setCustomPrice(e.target.value)}),
+                                    React.createElement('button', {
+                                        onClick: () => addTransaction(customName, customPrice, 'sale'),
+                                        disabled: !customName || !customPrice,
+                                        className: "bg-slate-900 text-white rounded-xl px-6 font-semibold disabled:opacity-50"
+                                    }, React.createElement(Icon, {name: "plus", size: 24}))
+                                )
+                            )
+                        ),
+
+
+                        // TAB MOVIMIENTOS
+                        activeTab === 'movements' && React.createElement('div', {className: "animate-fade-in"},
+                            React.createElement('section', {className: "bg-white p-5 rounded-2xl shadow-sm border border-gray-100"},
+                                React.createElement('h2', {className: "text-sm font-semibold text-gray-500 uppercase tracking-wider mb-4"}, "Registrar Movimiento"),
+                                React.createElement('div', {className: "flex bg-gray-100 p-1 rounded-xl mb-4"},
+                                    React.createElement('button', {className: `flex-1 py-2 rounded-lg text-sm font-semibold flex justify-center gap-2 ${movType === 'out' ? 'bg-white shadow text-red-600' : 'text-gray-500'}`, onClick: () => setMovType('out')}, React.createElement(Icon, {name: "arrow-up-circle", size: 18}), "Retiro"),
+                                    React.createElement('button', {className: `flex-1 py-2 rounded-lg text-sm font-semibold flex justify-center gap-2 ${movType === 'in' ? 'bg-white shadow text-emerald-600' : 'text-gray-500'}`, onClick: () => setMovType('in')}, React.createElement(Icon, {name: "arrow-down-circle", size: 18}), "Ingreso")
+                                ),
+                                React.createElement('input', {type: "number", placeholder: "Monto", className: "w-full bg-gray-50 border rounded-xl px-4 py-3 mb-3 font-bold text-lg", value: movAmount, onChange: e => setMovAmount(e.target.value)}),
+                                React.createElement('textarea', {placeholder: "Concepto", className: "w-full bg-gray-50 border rounded-xl px-4 py-3 mb-3 resize-none h-20", value: movConcept, onChange: e => setMovConcept(e.target.value)}),
+                                React.createElement('button', {
+                                    onClick: () => addTransaction(movConcept, movAmount, movType),
+                                    disabled: !movAmount || !movConcept,
+                                    className: `w-full text-white rounded-xl py-4 font-bold disabled:opacity-50 flex justify-center gap-2 ${movType === 'out' ? 'bg-red-500' : 'bg-emerald-500'}`
+                                }, React.createElement(Icon, {name: movType === 'out' ? "arrow-up-circle" : "arrow-down-circle", size: 20}), "Registrar")
+                            )
+                        ),
+
+
+                        // TAB AJUSTES
+                        activeTab === 'settings' && React.createElement('div', {className: "animate-fade-in"},
+                            React.createElement('section', {className: "mb-8 bg-white p-5 rounded-2xl shadow-sm"},
+                                React.createElement('h2', {className: "text-sm font-semibold text-gray-500 mb-4 flex items-center gap-2"}, React.createElement(Icon, {name: "store", size: 18}), "Crear Botón"),
+                                React.createElement('form', {onSubmit: addQuickItem, className: "flex flex-col gap-4"},
+                                    React.createElement('div', {className: "grid grid-cols-2 gap-3"},
+                                        React.createElement('input', {type: "text", placeholder: "Nombre", required: true, className: "bg-gray-50 border rounded-xl px-4 py-3", value: newItemName, onChange: e => setNewItemName(e.target.value)}),
+                                        React.createElement('input', {type: "number", placeholder: "Precio", required: true, className: "bg-gray-50 border rounded-xl px-4 py-3", value: newItemPrice, onChange: e => setNewItemPrice(e.target.value)})
+                                    ),
+                                    React.createElement('div', null,
+                                        React.createElement('p', {className: "text-xs text-gray-500 mb-2"}, "Icono:"),
+                                        React.createElement('div', {className: "flex gap-2 overflow-x-auto pb-2 custom-scrollbar"},
+                                            Object.keys(ICON_NAMES).slice(0,10).map(iconName => React.createElement('button', {
+                                                key: iconName, type: "button", onClick: () => setNewItemIcon(iconName),
+                                                className: `p-3 rounded-xl border flex-shrink-0 ${newItemIcon === iconName ? 'bg-slate-900 text-white' : 'bg-gray-50 text-gray-500'}`
+                                            }, React.createElement(Icon, {name: ICON_NAMES[iconName], size: 20})))
+                                        )
+                                    ),
+                                    React.createElement('div', null,
+                                        React.createElement('p', {className: "text-xs text-gray-500 mb-2"}, "Color:"),
+                                        React.createElement('div', {className: "flex gap-2 overflow-x-auto pb-2 custom-scrollbar"},
+                                            COLOR_MAP.map(color => React.createElement('button', {
+                                                key: color, type: "button", onClick: () => setNewItemColor(color),
+                                                className: `w-10 h-10 rounded-full flex-shrink-0 ${color} ${newItemColor === color ? 'ring-4 ring-slate-900 ring-offset-2' : ''}`
+                                            }))
+                                        )
+                                    ),
+                                    React.createElement('button', {type: "submit", disabled: !newItemName || !newItemPrice, className: "w-full bg-slate-900 text-white rounded-xl py-4 font-semibold disabled:opacity-50"}, "Guardar Artículo")
+                                )
+                            ),
+                            React.createElement('section', {className: "mb-8"},
+                                React.createElement('h2', {className: "text-sm font-semibold text-gray-500 mb-3"}, "Tus Botones"),
+                                React.createElement('div', {className: "flex flex-col gap-2"},
+                                    quickItems.map(item => React.createElement('div', {key: item.id, className: "bg-white p-3 rounded-xl border flex justify-between items-center"},
+                                        React.createElement('div', {className: "flex items-center gap-3"},
+                                            React.createElement('div', {className: `p-2 rounded-lg text-white ${item.colorClass}`}, React.createElement(Icon, {name: ICON_NAMES[item.iconStr] || 'circle', size: 18})),
+                                            React.createElement('div', null, React.createElement('p', {className: "font-semibold text-sm"}, item.name), React.createElement('p', {className: "text-xs text-gray-500"}, formatMoney(item.price)))
+                                        ),
+                                        React.createElement('button', {onClick: () => deleteQuickItem(item.id), className: "text-red-400 p-2"}, React.createElement(Icon, {name: "trash-2", size: 18}))
+                                    ))
+                                )
+                            ),
+                            React.createElement('section', {className: "bg-red-50 p-4 rounded-2xl border border-red-100"},
+                                React.createElement('div', {className: "flex justify-between items-center"},
+                                    React.createElement('div', null, React.createElement('p', {className: "text-sm font-bold text-red-800"}, "Cuenta"), React.createElement('p', {className: "text-xs text-red-600"}, user.email)),
+                                    React.createElement('button', {onClick: handleLogout, className: "bg-red-100 text-red-700 px-4 py-2 rounded-lg text-sm font-semibold flex items-center gap-2"}, React.createElement(Icon, {name: "log-out", size: 16}), "Salir")
+                                )
+                            )
+                        ),
+
+
+                        // HISTORIAL GLOBAL
+                        activeTab !== 'settings' && React.createElement('section', {className: "mt-6 border-t pt-6"},
+                            React.createElement('h2', {className: "text-sm font-semibold text-gray-500 uppercase tracking-wider mb-4"}, "Historial de Hoy"),
+                            todaysTransactions.length === 0 ? React.createElement('p', {className: "text-center text-gray-400 text-sm"}, "Sin movimientos hoy.") :
+                            React.createElement('div', {className: "flex flex-col gap-2"},
+                                todaysTransactions.map(tx => {
+                                    const isSale = tx.type === 'sale', isIn = tx.type === 'in', isOut = tx.type === 'out';
+                                    return React.createElement('div', {key: tx.id, className: "bg-white p-4 rounded-xl shadow-sm border flex justify-between items-center"},
+                                        React.createElement('div', {className: "flex items-center gap-3"},
+                                            React.createElement('div', {className: `p-2 rounded-full ${isSale ? 'bg-blue-50 text-blue-600' : isIn ? 'bg-emerald-50 text-emerald-600' : 'bg-red-50 text-red-600'}`}, 
+                                                React.createElement(Icon, {name: isSale ? "store" : isIn ? "arrow-down-circle" : "arrow-up-circle", size: 16})
+                                            ),
+                                            React.createElement('div', null,
+                                                React.createElement('p', {className: "font-semibold text-sm"}, tx.description),
+                                                React.createElement('p', {className: "text-[10px] text-gray-400 flex items-center gap-1"}, React.createElement(Icon, {name: "clock", size: 10}), formatTime(tx.timestamp), React.createElement('span', {className: "uppercase ml-1"}, isSale ? 'Venta' : isIn ? 'Ingreso' : 'Retiro'))
+                                            )
+                                        ),
+                                        React.createElement('div', {className: "flex items-center gap-3"},
+                                            React.createElement('p', {className: `font-bold ${isOut ? 'text-red-500' : ''}`}, `${isOut ? '-' : '+'}${formatMoney(tx.amount)}`),
+                                            React.createElement('button', {onClick: () => setItemToDelete(tx.id), className: "text-gray-300 hover:text-red-500"}, React.createElement(Icon, {name: "trash-2", size: 18}))
+                                        )
+                                    )
+                                })
+                            )
+                        )
+                    )
+                ),
+
+
+                // NAV BAR
+                React.createElement('nav', {className: "bg-white border-t fixed bottom-0 w-full max-w-md pb-safe"},
+                    React.createElement('div', {className: "flex justify-around p-2"},
+                        ['pos', 'movements', 'settings'].map(tab => {
+                            const icons = { pos: 'store', movements: 'arrow-right-left', settings: 'settings' };
+                            const labels = { pos: 'Caja', movements: 'Movimientos', settings: 'Ajustes' };
+                            return React.createElement('button', {
+                                key: tab, onClick: () => setActiveTab(tab),
+                                className: `flex flex-col items-center w-20 h-14 rounded-xl ${activeTab === tab ? 'text-emerald-600' : 'text-gray-400'}`
+                            },
+                                React.createElement(Icon, {name: icons[tab], size: 24}),
+                                React.createElement('span', {className: "text-[10px] font-bold uppercase"}, labels[tab])
+                            );
+                        })
+                    )
+                )
+            );
+        }
+
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(React.createElement(App));
+    </script>
+</body>
+</html>
+
+
+```
